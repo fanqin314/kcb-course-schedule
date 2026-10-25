@@ -1,0 +1,23 @@
+# 教务系统账号密码（绝对不要提交）
+.kcb-account.json
+
+# 浏览器登录态 / 抓取的原始页面
+.kcb-browser-profile/
+kcb_raw.html
+
+# 卡住时自动保存的调试截图
+.kcb-debug/
+
+# 登录失败计数（防止反复试错锁账号）
+.kcb-login-state.json
+
+# 依赖与备份
+node_modules/
+kcb-data.js.bak
+
+# 同步运行态（每次同步都会变，不必入库）
+.kcb-last-sync.json
+
+# IDE / 本地工具目录
+.trae/
+.workbuddy/

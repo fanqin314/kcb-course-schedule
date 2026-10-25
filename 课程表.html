@@ -1327,6 +1327,30 @@
         padding: .2rem .72rem .22rem;
         white-space: nowrap;
     }
+    .hero-title .hero-meta {
+        display: flex;
+        align-items: center;
+        gap: .4rem;
+        flex-shrink: 0;
+    }
+    .hero-title .sync-tag {
+        font-family: var(--study-font-mono);
+        font-size: .62rem;
+        letter-spacing: .02em;
+        color: rgba(255, 255, 255, .68);
+        border: 1px solid rgba(255, 255, 255, .22);
+        border-radius: 999px;
+        padding: .16rem .55rem .18rem;
+        white-space: nowrap;
+    }
+    .hero-title .sync-tag[hidden] { display: none; }
+    .hero-title .sync-tag.has-hidden {
+        color: #FFE3C2;
+        border-color: rgba(255, 227, 194, .55);
+        background: rgba(184, 112, 75, .38);
+        cursor: pointer;
+    }
+    .hero-title .sync-tag.has-hidden:hover { background: rgba(184, 112, 75, .6); }
 
     /* ================================================
        周次选择器
@@ -1736,7 +1760,10 @@
     <header class="hero">
         <div class="hero-title">
             <span class="brand"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"></path><circle cx="12" cy="10" r="3"></circle></svg>课程总览</span>
-            <span class="total" id="courseCount">0 门</span>
+            <span class="hero-meta">
+                <span class="total" id="courseCount">0 门</span>
+                <span class="sync-tag" id="syncTag" hidden></span>
+            </span>
         </div>
         <div class="hero-top">
             <div class="clock">
@@ -1881,15 +1908,143 @@ const MAX_WEEK = KCB.max_week;
 const NORMAL_TIMES = KCB.normal_times;
 const SPECIAL_PM_TIMES = KCB.special_pm_times;
 
-let COURSES;
-try {
-    const saved = localStorage.getItem('kcb_courses');
-    COURSES = saved ? JSON.parse(saved) : KCB.courses.map(c => ({ ...c }));
-} catch {
-    COURSES = KCB.courses.map(c => ({ ...c }));
+/* ----------------------------------------------------------------
+ * 数据合成规则（重要）
+ * 以前这里把「整份 COURSES」写进 localStorage，结果只要手动改过一次课程，
+ * 课表就永久停在那一份旧快照上 —— 教务系统后来又同步回来的新课（比如
+ * 第9周周一新增的电工课）再也进不来，看起来就像「同步没识别到」。
+ * 现在改成：同步数据永远以 kcb-data.js 为准，localStorage 只记手动改动：
+ *   manual  手动新增/手动改过的课（同步后保留）
+ *   deleted 手动删掉的课（按 课程名|星期|起始节 记）
+ * ---------------------------------------------------------------- */
+const LOCAL_KEY = 'kcb_local_v1';
+const LEGACY_KEY = 'kcb_courses';          // 旧版整份缓存，仅用于一次性迁移
+
+const courseKey = (c) => [c.name, c.day, c.start].join('|');
+const sameCourse = (a, b) => !!a && !!b && a.day === b.day && a.start === b.start && a.name === b.name;
+
+function loadLocal() {
+    let v = null;
+    try { v = JSON.parse(localStorage.getItem(LOCAL_KEY) || 'null'); } catch (_) {}
+    if (v && Array.isArray(v.manual)) {
+        return { manual: v.manual, deleted: Array.isArray(v.deleted) ? v.deleted : [] };
+    }
+    // 旧格式迁移：旧快照里能和同步数据对上的视为同步课（丢弃，改用最新），
+    // 对不上的才当成用户自己加的课保留下来
+    const out = { manual: [], deleted: [] };
+    try {
+        const legacy = JSON.parse(localStorage.getItem(LEGACY_KEY) || 'null');
+        if (Array.isArray(legacy)) {
+            for (const c of legacy) {
+                if (!c || !c.name) continue;
+                if (!KCB.courses.some((e) => sameCourse(e, c))) out.manual.push({ ...c });
+            }
+        }
+    } catch (_) {}
+    try { localStorage.removeItem(LEGACY_KEY); } catch (_) {}
+    saveLocal(out);
+    return out;
 }
-function saveCourses() {
-    try { localStorage.setItem('kcb_courses', JSON.stringify(COURSES)); } catch {}
+function saveLocal(v) {
+    try { localStorage.setItem(LOCAL_KEY, JSON.stringify(v)); } catch (_) {}
+}
+
+const LOCAL = loadLocal();
+
+/** 同步课 + 手动改动 = 当前课表 */
+function buildCourses() {
+    const gone = new Set(LOCAL.deleted);
+    for (const m of LOCAL.manual) if (m._replaces) gone.add(m._replaces);
+    const list = KCB.courses
+        .filter((e) => !gone.has(courseKey(e)))
+        .map((e) => ({ ...e }));
+    for (const m of LOCAL.manual) {
+        if (!list.some((e) => sameCourse(e, m))) {
+            const { _replaces, ...rest } = m;
+            list.push({ ...rest, _manual: true });
+        }
+    }
+    return list;
+}
+let COURSES = buildCourses();
+
+// 顶部小标签：显示同步时间；有被手动隐藏的课就变成「点此恢复」的入口
+function renderSyncTag() {
+    const el = document.getElementById('syncTag');
+    if (!el) return;
+    const hidden = LOCAL.deleted.length;
+    if (hidden) {
+        el.textContent = `已隐藏 ${hidden} 门 · 点此恢复`;
+        el.title = '这些课在教务系统里还在，只是被你在页面里删掉了。点一下全部恢复。';
+        el.classList.add('has-hidden');
+        el.hidden = false;
+        return;
+    }
+    el.classList.remove('has-hidden');
+    const t = KCB.synced_at ? new Date(KCB.synced_at) : null;
+    if (!t || isNaN(t.getTime())) {
+        // 同步脚本是旧版本时没有这个字段，至少给个正常的状态文案，别留空
+        el.textContent = '教务课表';
+        el.title = '数据来自教务系统（本次同步的脚本是旧版本，没带同步时间；重启控制台后就有了）';
+        el.hidden = false;
+        return;
+    }
+    const pad = (n) => String(n).padStart(2, '0');
+    el.textContent = `同步 ${pad(t.getMonth() + 1)}-${pad(t.getDate())} ${pad(t.getHours())}:${pad(t.getMinutes())}`;
+    el.title = `课程数据来自教务系统，最后同步于 ${t.toLocaleString('zh-CN')}`;
+    el.hidden = false;
+}
+
+/** 恢复所有被手动隐藏的同步课 */
+function restoreHiddenCourses() {
+    if (!LOCAL.deleted.length) return;
+    LOCAL.deleted = [];
+    saveLocal(LOCAL);
+    COURSES = buildCourses();
+    if (typeof refreshSuggestions === 'function') refreshSuggestions();
+    renderSyncTag();
+    render(true);
+}
+
+(function initSyncTag() {
+    const el = document.getElementById('syncTag');
+    if (!el) return;
+    el.addEventListener('click', () => {
+        if (LOCAL.deleted.length) restoreHiddenCourses();
+    });
+    renderSyncTag();
+})();
+
+/** 加课 / 改课（改同步课时转存为手动课，避免下次同步把改动冲掉） */
+function upsertCourse(idx, data) {
+    const old = idx >= 0 ? COURSES[idx] : null;
+    if (old && old._manual) {
+        LOCAL.manual = LOCAL.manual.filter((m) => !sameCourse(m, old));
+        LOCAL.manual.push({ ...data });
+    } else if (old) {
+        // 改的是同步课：记一条「替换」，不动 deleted，免得恢复入口误报
+        LOCAL.manual.push({ ...data, _replaces: courseKey(old) });
+    } else {
+        LOCAL.manual.push({ ...data });
+    }
+    saveLocal(LOCAL);
+    COURSES = buildCourses();
+    renderSyncTag();
+}
+
+/** 删课 */
+function removeCourse(idx) {
+    const c = COURSES[idx];
+    if (!c) return;
+    if (c._manual) {
+        LOCAL.manual = LOCAL.manual.filter((m) => !sameCourse(m, c));
+    } else {
+        const k = courseKey(c);
+        if (!LOCAL.deleted.includes(k)) LOCAL.deleted.push(k);
+    }
+    saveLocal(LOCAL);
+    COURSES = buildCourses();
+    renderSyncTag();
 }
 
 const DAY_NAMES = ['一', '二', '三', '四', '五', '六', '日'];
@@ -2468,8 +2623,7 @@ function renderDayView(animate, expandedIds) {
                 }
                 const idx = parseInt(del.dataset.rm, 10);
                 if (!isNaN(idx) && COURSES[idx]) {
-                    COURSES.splice(idx, 1);
-                    saveCourses();
+                    removeCourse(idx);
                     refreshSuggestions();
                     render(true);
                 }
@@ -2944,12 +3098,7 @@ document.getElementById('acOk').addEventListener('click', () => {
         span: parseInt(acSpan.value, 10),
         name, teacher: acTeacher.value.trim(), room, weeks
     };
-    if (editingIdx >= 0 && COURSES[editingIdx]) {
-        Object.assign(COURSES[editingIdx], data);
-    } else {
-        COURSES.push(data);
-    }
-    saveCourses();
+    upsertCourse(editingIdx, data);
     refreshSuggestions();
     closeAddCourse();
     render(true);

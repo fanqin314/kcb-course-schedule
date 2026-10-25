@@ -1,0 +1,15 @@
+{
+  "name": "kebiaotongbu",
+  "version": "1.0.0",
+  "private": true,
+  "description": "四川工业科技学院教务系统课表同步脚本（生成 kcb-data.js）",
+  "scripts": {
+    "sync": "node sync_kcb.js",
+    "sync:dry": "node sync_kcb.js --dry-run",
+    "sync:debug": "node sync_kcb.js --dry-run --debug"
+  },
+  "dependencies": {
+    "cheerio": "^1.2.0",
+    "playwright": "^1.64.1"
+  }
+}

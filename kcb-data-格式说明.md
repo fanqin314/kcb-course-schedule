@@ -22,6 +22,8 @@
 (function (g) {
     g.KCB_DATA = {
 
+        synced_at: '2026-10-25T15:44:10.000Z',  // 同步时间（ISO，UTC）。页面右上角小标签就显示它；可省略
+
         courses: [ /* 课程数组，见下 */ ],
 
         semester_start: '2026-08-31',   // 开学日期，'YYYY-MM-DD'，当天视为第 1 周周一
