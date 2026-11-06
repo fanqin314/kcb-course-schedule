@@ -1,0 +1,8 @@
+# Gradle / Android 构建产物
+.gradle/
+build/
+app/build/
+local.properties
+*.iml
+.idea/
+captures/

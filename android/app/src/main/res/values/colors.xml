@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="page_bg">#EDE3D1</color>
+    <!-- 顶部 hero 是深墨色，状态栏跟随它才不会在上方留一条浅色带 -->
+    <color name="bar_bg">#1A1512</color>
+    <color name="nav_bg">#1A1512</color>
+    <color name="icon_bg">#FFFFFF</color>
+</resources>
