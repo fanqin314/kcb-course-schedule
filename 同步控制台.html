@@ -534,7 +534,7 @@
     }
 
     /** 阶段 → 进度条索引 */
-    const PHASE_INDEX = { fetch: 0, auth: 1, parse: 2, write: 3, done: 4, idle: -1, error: -1 };
+    const PHASE_INDEX = { fetch: 0, auth: 1, parse: 2, write: 3, publish: 3, done: 4, idle: -1, error: -1 };
     function paintSteps(idx, isError) {
         steps.forEach((s, i) => {
             s.classList.remove('on', 'done', 'err');
