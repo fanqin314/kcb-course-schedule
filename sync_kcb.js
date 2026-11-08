@@ -27,6 +27,10 @@
  *   --semester-start DATE  覆盖开学日期，如 2027-02-27（默认继承现有 kcb-data.js）
  *   --max-week N           覆盖学期总周数（默认继承现有 kcb-data.js）
  *   --timeout-min N        模式一等待的超时分钟数（默认 10）
+ *   --no-push              只写本地 kcb-data.js，不提交/推送到 GitHub
+ *
+ * 同步成功后会自动 git add/commit/push 更新的 kcb-data.js，
+ * 这样 GitHub Pages 与手机端才能看到最新课表（无需手动推）。
  * ============================================================================= */
 'use strict';
 
@@ -55,7 +59,7 @@ const CONFIG = {
 
 /* ------------------------------ 参数解析 ---------------------------------- */
 function parseArgs(argv) {
-    const args = { dryRun: false, debug: false, cookie: '', url: '', html: '', timeoutMin: 10, semesterStart: '', maxWeek: 0, saveAccount: false, noAccount: false, force: false };
+    const args = { dryRun: false, debug: false, cookie: '', url: '', html: '', timeoutMin: 10, semesterStart: '', maxWeek: 0, saveAccount: false, noAccount: false, force: false, push: true };
     for (let i = 2; i < argv.length; i++) {
         const a = argv[i];
         if (a === '--dry-run') args.dryRun = true;
@@ -63,6 +67,7 @@ function parseArgs(argv) {
         else if (a === '--save-account') args.saveAccount = true;
         else if (a === '--no-account') args.noAccount = true;
         else if (a === '--force') args.force = true;
+        else if (a === '--no-push') args.push = false;
         else if (a === '--cookie') args.cookie = argv[++i] || '';
         else if (a === '--url') args.url = argv[++i] || '';
         else if (a === '--html') args.html = argv[++i] || '';
@@ -1280,6 +1285,35 @@ async function fetchViaPortal(args) {
     }
 }
 
+/* ---------------------------- 发布到 GitHub -------------------------------- */
+/**
+ * 把生成的数据文件提交并推送到 GitHub（Pages 从仓库读数据，手机端才能看到）。
+ * 仅在内容确实变化时才提交；任何失败都只警告，不影响本次同步结果。
+ */
+function publishToGitHub(fileName) {
+    const { execFileSync } = require('child_process');
+    const run = (arr) => execFileSync('git', arr, { cwd: process.cwd(), stdio: 'pipe', encoding: 'utf8' });
+    try {
+        run(['add', fileName]);
+        let staged = '';
+        try { staged = (run(['diff', '--cached', '--name-only']) || '').trim(); } catch (_) { staged = ''; }
+        if (!staged) {
+            log(C.gray('  ℹ️ 课表无变化，跳过 GitHub 推送'));
+            return { pushed: false, reason: 'no-change' };
+        }
+        const msg = 'sync: 更新课表数据 ' + new Date().toLocaleString('zh-CN');
+        run(['commit', '-m', msg]);
+        run(['push', 'origin', 'main']);
+        log(C.green('  ✅ 已推送到 GitHub，手机端约 1 分钟后刷新即可看到'));
+        return { pushed: true };
+    } catch (e) {
+        const detail = (e.stderr || e.stdout || e.message || '').toString().trim().split('\n').filter(Boolean).slice(-1)[0] || '未知错误';
+        log(C.yellow('  ⚠️ 自动推送 GitHub 失败：' + detail));
+        log(C.yellow(`     可手动执行：git add ${fileName} && git commit -m "sync: 更新课表" && git push`));
+        return { pushed: false, reason: 'error' };
+    }
+}
+
 /* ============================================================================
  * 五、主流程
  * ========================================================================== */
@@ -1410,8 +1444,17 @@ async function runSync(args) {
     }
     fs.writeFileSync(dataPath, generateKcbDataJs(data), 'utf8');
     log(C.green(`  ✅ 已写入 ${CONFIG.dataFile}，刷新 课程表.html 即可看到最新课表\n`));
-    emitEvent('phase', { phase: 'done', text: '同步完成' });
-    return { courses, diff, written: true, data };
+
+    // 6. 推送 GitHub（手机/其他设备通过 Pages 读取同一份数据）
+    let published = false;
+    if (args.push) {
+        emitEvent('phase', { phase: 'publish', text: '正在推送到 GitHub' });
+        published = publishToGitHub(CONFIG.dataFile).pushed;
+    } else {
+        log(C.gray('  ℹ️ 已指定 --no-push，未推送 GitHub'));
+    }
+    emitEvent('phase', { phase: 'done', text: published ? '同步完成并已推送 GitHub' : '同步完成' });
+    return { courses, diff, written: true, published, data };
 }
 
 /** 程序入口：无参数进菜单；带参数直接执行 */
@@ -1435,5 +1478,5 @@ module.exports = {
     loadAccount, diffCourses, expandWeeks, normalizeWeeks, generateKcbDataJs, CONFIG,
     runSync, parseArgs, readExistingData, serializeDiff, courseLabel,
     setLogHook, setEventHook, log, probeService, probeAdvice,
-    fetchViaPortal, mergePortalWeeks, compressWeeks,
+    fetchViaPortal, mergePortalWeeks, compressWeeks, publishToGitHub,
 };
